@@ -4,26 +4,37 @@ use humantime::Duration;
 use hyper::body::HttpBody;
 use hyper::{client::HttpConnector, Body, Client, Uri};
 use quanta::Clock;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 pub use structopt::StructOpt;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
+pub mod spec;
 pub mod summary;
 
 #[derive(Clone, Debug, StructOpt)]
 pub struct Opt {
+    /// Server endpoint to test. With no config present murk will just spam HTTP GET requests to
+    /// this address.
     #[structopt(name = "url")]
     endpoint: String,
+    /// Number of jobs (worker threads) to use in the scheduler
     #[structopt(short = "j", long = "n-jobs")]
     jobs: Option<usize>,
+    /// Number of HTTP connections to use concurrently
     #[structopt(short = "c", long = "connections")]
     connections: Option<usize>,
+    /// Timeout for a request. If a request takes longer than this to respond it will be cancelled
     #[structopt(short = "t", long = "timeout")]
     timeout: Duration,
+    /// Duration to run the loadtest for
     #[structopt(short = "d", long = "duration")]
     duration: Duration,
+    /// Path to a configuration file
+    #[structopt(long = "config")]
+    config: Option<PathBuf>,
 }
 
 impl Opt {
@@ -115,7 +126,6 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
     for _ in 0..opt.connections() {
         jobs.push(tokio::task::spawn(run_user(tx.clone(), opt.clone())));
     }
-    let mut conn = 0;
     while let Some(j) = jobs.next().await {
         // Closing down jobs
     }

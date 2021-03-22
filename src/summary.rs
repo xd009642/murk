@@ -24,7 +24,7 @@ impl Summary {
     pub fn new(timeout: Duration) -> Self {
         Self {
             // This should maybe have a buffer
-            histogram: Histogram::<u64>::new_with_max(timeout.as_millis() as u64, 4).unwrap(),
+            histogram: Histogram::<u64>::new_with_max(timeout.as_millis() as u64, 3).unwrap(),
             success: 0,
             failure: 0,
             timeout: 0,
