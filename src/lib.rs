@@ -23,7 +23,7 @@ pub struct Opt {
 
 impl Opt {
     pub fn connections(&self) -> usize {
-        self.connections.unwrap_or(10000)
+        self.connections.unwrap_or(500)
     }
 
     pub fn jobs(&self) -> usize {
@@ -36,6 +36,7 @@ pub struct Summary {
     success: usize,
     failure: usize,
     timeout: usize,
+    bytes_read: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -62,8 +63,10 @@ async fn run_user(opt: Arc<Opt>) -> Summary {
             res = timeout(timeout_dur, client.get(uri.clone())) => {
                 match res {
                     Ok(Ok(mut s)) => {
-                     //   while let Some(_body) = s.body_mut().data().await {
-                      //  }
+
+                        while let Some(Ok(body)) = s.body_mut().data().await {
+                            summary.bytes_read += body.len();
+                        }
                         summary.success += 1;
                     },
                     Ok(Err(e)) => {
