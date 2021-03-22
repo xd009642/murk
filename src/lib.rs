@@ -13,6 +13,8 @@ pub struct Opt {
     endpoint: String,
     #[structopt(short = "j", long = "n-jobs")]
     jobs: Option<usize>,
+    #[structopt(short = "c", long = "connections")]
+    connections: Option<usize>,
     #[structopt(short = "t", long = "timeout")]
     timeout: Duration,
     #[structopt(short = "d", long = "duration")]
@@ -20,6 +22,10 @@ pub struct Opt {
 }
 
 impl Opt {
+    pub fn connections(&self) -> usize {
+        self.connections.unwrap_or(10000)
+    }
+
     pub fn jobs(&self) -> usize {
         self.jobs.unwrap_or_else(num_cpus::get)
     }
@@ -81,7 +87,7 @@ async fn run_user(opt: Arc<Opt>) -> Summary {
 
 pub async fn run_loadtest(opt: Arc<Opt>) {
     let mut jobs = FuturesUnordered::new();
-    for i in 0..opt.jobs() {
+    for i in 0..opt.connections() {
         jobs.push(tokio::task::spawn(run_user(opt.clone())));
     }
     let mut total_reqs = 0;
