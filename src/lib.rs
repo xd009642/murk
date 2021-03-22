@@ -1,11 +1,16 @@
+use crate::summary::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use humantime::Duration;
 use hyper::body::HttpBody;
 use hyper::{client::HttpConnector, Body, Client, Uri};
 use quanta::Clock;
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
 pub use structopt::StructOpt;
+use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
+
+pub mod summary;
 
 #[derive(Clone, Debug, StructOpt)]
 pub struct Opt {
@@ -31,14 +36,6 @@ impl Opt {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Summary {
-    success: usize,
-    failure: usize,
-    timeout: usize,
-    bytes_read: usize,
-}
-
 #[derive(Debug, Clone)]
 pub struct MurkSession {
     setup_fn: (),
@@ -48,32 +45,48 @@ pub struct MurkSession {
     response_fn: (),
 }
 
-async fn run_user(opt: Arc<Opt>) -> Summary {
+async fn run_user(tx: mpsc::UnboundedSender<RequestStats>, opt: Arc<Opt>) {
     let uri: Uri = opt.endpoint.parse().expect("Invalid URL");
-    let mut summary = Summary::default();
     let clock = Clock::new();
     let client = Client::new();
-    let start = clock.now();
     let timeout_dur = *opt.timeout;
     let delay = sleep(*opt.duration);
     tokio::pin!(delay);
     loop {
+        let start = clock.now();
         tokio::select! {
             biased;
             res = timeout(timeout_dur, client.get(uri.clone())) => {
                 match res {
                     Ok(Ok(mut s)) => {
-
+                        let mut bytes_read = 0;
                         while let Some(Ok(body)) = s.body_mut().data().await {
-                            summary.bytes_read += body.len();
+                            bytes_read += body.len();
                         }
-                        summary.success += 1;
+                        let end = clock.now();
+                        let request_time = Some(end.duration_since(start));
+                        tx.send(RequestStats {
+                            status: Some(s.status()),
+                            request_time,
+                            timeout: false,
+                            bytes_read: Some(bytes_read),
+                        });
                     },
                     Ok(Err(e)) => {
-                        summary.failure += 1;
+                        tx.send(RequestStats {
+                            status: None,
+                            request_time: None,
+                            timeout: false,
+                            bytes_read: None,
+                        });
                     },
                     Err(e) => {
-                        summary.timeout += 1;
+                        tx.send(RequestStats {
+                            status: None,
+                            request_time: None,
+                            timeout: true,
+                            bytes_read: None,
+                        });
                     },
                 }
             }
@@ -82,21 +95,31 @@ async fn run_user(opt: Arc<Opt>) -> Summary {
             }
         }
     }
-    let end = clock.now();
-    let request_time = end.duration_since(start).as_secs_f32();
-    println!("User ran for {}", request_time);
+}
+
+pub async fn stats_collection(
+    mut rx: mpsc::UnboundedReceiver<RequestStats>,
+    opt: Arc<Opt>,
+) -> Summary {
+    let mut summary = Summary::new(*opt.timeout);
+    while let Some(stat) = rx.recv().await {
+        summary += stat;
+    }
     summary
 }
 
 pub async fn run_loadtest(opt: Arc<Opt>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let stats = tokio::task::spawn(stats_collection(rx, opt.clone()));
     let mut jobs = FuturesUnordered::new();
-    for i in 0..opt.connections() {
-        jobs.push(tokio::task::spawn(run_user(opt.clone())));
+    for _ in 0..opt.connections() {
+        jobs.push(tokio::task::spawn(run_user(tx.clone(), opt.clone())));
     }
-    let mut total_reqs = 0;
+    let mut conn = 0;
     while let Some(j) = jobs.next().await {
-        println!("User finished: {:?}", j);
-        total_reqs += j.unwrap().success;
+        // Closing down jobs
     }
-    println!("Total requests: {}", total_reqs);
+    std::mem::drop(tx);
+    let summary = stats.await.unwrap();
+    println!("Request summary:\n{}", summary);
 }
