@@ -11,6 +11,7 @@ pub use structopt::StructOpt;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
+pub mod request;
 pub mod spec;
 pub mod summary;
 

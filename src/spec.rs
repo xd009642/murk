@@ -87,7 +87,6 @@ mod tests {
                             file:
                               type: string
                               format: binary
-
         "#;
 
         let _spec: Specification = from_str(sample_spec).unwrap();
