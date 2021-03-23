@@ -25,6 +25,7 @@ serde_yaml = "0.8"
 indexmap = "1.6.2"
 bytes = "1.0.1"
 random_choice = "0.3.2"
+url = "2.2.1"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = { version = "0.3", features = ["background_threads"] }

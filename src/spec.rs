@@ -21,41 +21,41 @@ fn one() -> usize {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Specification {
-    paths: IndexMap<String, PathItem>,
+    pub paths: IndexMap<String, PathItem>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PathItem {
-    get: Option<Operation>,
-    post: Option<Operation>,
+    pub get: Option<Operation>,
+    pub post: Option<Operation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Operation {
     #[serde(default)]
-    request_data: IndexMap<String, Data>,
-    request_body: RequestBody,
+    pub request_data: IndexMap<String, Data>,
+    pub request_body: RequestBody,
     #[serde(default)]
-    parameters: Vec<Parameter>,
+    pub parameters: Vec<Parameter>,
     #[serde(default = "one")]
-    weight: usize,
+    pub weight: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Data {
-    values: IndexMap<String, TestValue>,
+    pub values: IndexMap<String, TestValue>,
     #[serde(default = "one")]
-    weight: usize,
+    pub weight: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestValue {
-    value: Option<Value>,
-    external_value: Option<PathBuf>,
+    pub value: Option<Value>,
+    pub external_value: Option<PathBuf>,
 }
 
 #[cfg(test)]
