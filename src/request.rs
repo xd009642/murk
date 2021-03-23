@@ -1,6 +1,6 @@
 use crate::spec::{Operation, Specification};
 use bytes::Bytes;
-use hyper::{Request, Uri};
+use hyper::{HeaderMap, Method, Request};
 use random_choice::random_choice;
 use url::Url;
 
@@ -9,11 +9,49 @@ pub struct RequestStore {
     pub(crate) weights: Vec<f64>,
     /// List of the requests to use. I'm kind of assuming since I'm using a Bytes to store the body
     /// that these will be relatively cheap to clone... But there's only one way to find out
-    pub(crate) requests: Vec<Request<Bytes>>,
+    pub(crate) requests: Vec<RequestBuilder>,
 }
 
-fn requests_from_operation(uri: Url, op: &Operation) -> (Vec<f64>, Vec<Request<Bytes>>) {
-    todo!()
+#[derive(Clone)]
+pub struct RequestBuilder {
+    url: Url,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+}
+
+impl RequestBuilder {
+    fn request(&self) -> Request<Bytes> {
+        let mut builder = Request::builder()
+            .uri(self.url.as_str())
+            .method(self.method.clone());
+        if let Some(headers) = builder.headers_mut() {
+            for (k, v) in &self.headers {
+                headers.insert(k, v.clone());
+            }
+        }
+        builder.body(self.body.clone()).unwrap()
+    }
+}
+
+fn requests_from_operation(
+    url: Url,
+    method: Method,
+    op: &Operation,
+) -> (Vec<f64>, Vec<RequestBuilder>) {
+    let mut weights = vec![];
+    let mut requests = vec![];
+    for (k, v) in &op.request_data {
+        weights.push((op.weight * v.weight) as f64);
+
+        requests.push(RequestBuilder {
+            url: url.clone(),
+            method: method.clone(),
+            headers: HeaderMap::new(),
+            body: Bytes::new(),
+        });
+    }
+    (weights, requests)
 }
 
 impl RequestStore {
@@ -26,12 +64,12 @@ impl RequestStore {
             let uri = base_uri.join(&name).expect("Invalid method name");
 
             if let Some(get) = item.get.as_ref() {
-                let (mut w, mut r) = requests_from_operation(uri.clone(), get);
+                let (mut w, mut r) = requests_from_operation(uri.clone(), Method::GET, get);
                 weights.append(&mut w);
                 requests.append(&mut r);
             }
             if let Some(post) = item.post.as_ref() {
-                let (mut w, mut r) = requests_from_operation(uri.clone(), post);
+                let (mut w, mut r) = requests_from_operation(uri.clone(), Method::POST, post);
                 weights.append(&mut w);
                 requests.append(&mut r);
             }
@@ -40,11 +78,11 @@ impl RequestStore {
         Self { weights, requests }
     }
 
-    pub fn get_request(&self) -> &Request<Bytes> {
+    pub fn get_request(&self) -> &RequestBuilder {
         self.get_requests(1).remove(0)
     }
 
-    pub fn get_requests(&self, samples: usize) -> Vec<&Request<Bytes>> {
+    pub fn get_requests(&self, samples: usize) -> Vec<&RequestBuilder> {
         assert_ne!(samples, 0, "Samples must be >0");
         assert!(!self.requests.is_empty(), "No request data");
         assert!(
