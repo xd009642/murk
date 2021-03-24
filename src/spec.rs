@@ -46,16 +46,26 @@ pub struct Operation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Data {
-    pub values: IndexMap<String, TestValue>,
+    #[serde(default)]
+    pub parameters: Vec<TestParameter>,
+    pub body: Option<TestBody>,
     #[serde(default = "one")]
     pub weight: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TestValue {
-    pub value: Option<Value>,
-    pub external_value: Option<PathBuf>,
+pub enum TestParameter {
+    Header { name: String, value: String },
+    Path(String),
+    Query { name: String, value: String },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TestBody {
+    Constant(String),
+    External(PathBuf),
 }
 
 #[cfg(test)]
@@ -71,14 +81,23 @@ mod tests {
                 post:
                   requestData:
                     static_string:
-                      values:
-                        file: 
-                          value: "I am a files contents"
+                      parameters:
+                        - header:
+                            name: X-Request-ID
+                            value: 77e1c83b-7bb0-437b-bc50-a7a58e5660ac
+                      body:
+                        external: "I am a files contents"
                     file_upload:
-                      values:
-                        file:
-                          external_value: "/home/xd009642/corpus"
+                      body:
+                        external: "/home/xd009642/corpus"
                   requestBody:
+                    parameters:
+                      - in: header
+                        name: X-Request-ID
+                        schema:
+                          type: string
+                          format: uuid
+                        required: true
                     content:
                       multipart/form-data:
                         schema: 
@@ -87,6 +106,9 @@ mod tests {
                             file:
                               type: string
                               format: binary
+                      application/octet-stream:
+                        schema:
+                          type: binary
         "#;
 
         let _spec: Specification = from_str(sample_spec).unwrap();

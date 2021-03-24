@@ -1,6 +1,9 @@
-use crate::spec::{Operation, Specification};
+use crate::spec::*;
 use bytes::Bytes;
-use hyper::{HeaderMap, Method, Request};
+use hyper::{
+    header::{HeaderName, HeaderValue},
+    HeaderMap, Method, Request,
+};
 use random_choice::random_choice;
 use url::Url;
 
@@ -42,7 +45,22 @@ fn requests_from_operation(
     let mut weights = vec![];
     let mut requests = vec![];
     for (k, v) in &op.request_data {
+        let mut url = url.clone();
         weights.push((op.weight * v.weight) as f64);
+        let mut headers = HeaderMap::new();
+        for param in &v.parameters {
+            match param {
+                TestParameter::Header { name, value } => {
+                    let name = HeaderName::from_bytes(name.as_bytes()).unwrap();
+                    let value = HeaderValue::from_str(value.as_str()).unwrap();
+                    headers.insert(name, value);
+                }
+                TestParameter::Path(s) => {
+                    // Join onto the url
+                }
+                TestParameter::Query { name, value } => {}
+            }
+        }
 
         requests.push(RequestBuilder {
             url: url.clone(),
