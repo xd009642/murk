@@ -1052,6 +1052,7 @@ dependencies = [
  "serde_yaml",
  "structopt",
  "tokio",
+ "tokio-stream",
  "tower",
  "url",
 ]

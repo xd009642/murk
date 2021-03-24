@@ -2,9 +2,12 @@ use crate::spec::*;
 use bytes::Bytes;
 use hyper::{
     header::{HeaderName, HeaderValue},
-    HeaderMap, Method, Request,
+    Body, HeaderMap, Method, Request,
 };
 use random_choice::random_choice;
+pub use std::convert::TryFrom;
+use std::fs;
+use std::path::Path;
 use url::Url;
 
 pub struct RequestStore {
@@ -23,8 +26,28 @@ pub struct RequestBuilder {
     body: Bytes,
 }
 
+impl TryFrom<String> for RequestBuilder {
+    type Error = url::ParseError;
+
+    fn try_from(url: String) -> Result<Self, Self::Error> {
+        let url = url.parse::<Url>()?;
+        Ok(Self::from(url))
+    }
+}
+
+impl From<Url> for RequestBuilder {
+    fn from(url: Url) -> Self {
+        Self {
+            url,
+            method: Method::GET,
+            headers: Default::default(),
+            body: Bytes::new(),
+        }
+    }
+}
+
 impl RequestBuilder {
-    fn request(&self) -> Request<Bytes> {
+    pub fn request(&self) -> Request<Body> {
         let mut builder = Request::builder()
             .uri(self.url.as_str())
             .method(self.method.clone());
@@ -33,7 +56,34 @@ impl RequestBuilder {
                 headers.insert(k, v.clone());
             }
         }
-        builder.body(self.body.clone()).unwrap()
+        builder.body(self.body.clone().into()).unwrap()
+    }
+
+    pub fn body_len(&self) -> usize {
+        self.body.len()
+    }
+}
+
+fn bodies_from_path(path: &Path) -> Vec<Bytes> {
+    if path.is_file() {
+        // just open and read all
+        vec![Bytes::from(fs::read(path).unwrap())]
+    } else if path.is_dir() {
+        let mut res = vec![];
+        let dir_stream = fs::read_dir(path).unwrap();
+        for entry in dir_stream {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                if let Ok(b) = fs::read(&path) {
+                    res.push(Bytes::from(b));
+                } else {
+                    println!("Couldn't read: {}", path.display());
+                }
+            }
+        }
+        res
+    } else {
+        panic!("Invalid path {} no data found", path.display());
     }
 }
 
@@ -46,7 +96,6 @@ fn requests_from_operation(
     let mut requests = vec![];
     for (k, v) in &op.request_data {
         let mut url = url.clone();
-        weights.push((op.weight * v.weight) as f64);
         let mut headers = HeaderMap::new();
         for param in &v.parameters {
             match param {
@@ -57,17 +106,47 @@ fn requests_from_operation(
                 }
                 TestParameter::Path(s) => {
                     // Join onto the url
+                    let mut seg = url.path_segments_mut().expect("URL Cannot be base");
+                    seg.push(s);
                 }
-                TestParameter::Query { name, value } => {}
+                TestParameter::Query { name, value } => {
+                    url.query_pairs_mut().append_pair(name, value);
+                }
             }
         }
 
-        requests.push(RequestBuilder {
-            url: url.clone(),
-            method: method.clone(),
-            headers: HeaderMap::new(),
-            body: Bytes::new(),
-        });
+        let mut reqs = if let Some(b) = &v.body {
+            match b {
+                TestBody::Constant(s) => {
+                    vec![RequestBuilder {
+                        url: url.clone(),
+                        method: method.clone(),
+                        headers,
+                        body: Bytes::from(s.clone()),
+                    }]
+                }
+                TestBody::External(p) => bodies_from_path(&p)
+                    .iter()
+                    .map(|body| RequestBuilder {
+                        url: url.clone(),
+                        method: method.clone(),
+                        headers: headers.clone(),
+                        body: body.clone(),
+                    })
+                    .collect(),
+            }
+        } else {
+            vec![RequestBuilder {
+                url: url.clone(),
+                method: method.clone(),
+                headers,
+                body: Bytes::new(),
+            }]
+        };
+        for _ in 0..reqs.len() {
+            weights.push((op.weight * v.weight) as f64);
+        }
+        requests.append(&mut reqs);
     }
     (weights, requests)
 }
@@ -92,7 +171,6 @@ impl RequestStore {
                 requests.append(&mut r);
             }
         }
-
         Self { weights, requests }
     }
 
@@ -109,5 +187,9 @@ impl RequestStore {
         );
 
         random_choice().random_choice_f64(&self.requests, &self.weights, samples)
+    }
+
+    pub fn len(&self) -> usize {
+        self.requests.len()
     }
 }

@@ -1,9 +1,12 @@
+use crate::request::*;
+use crate::spec::*;
 use crate::summary::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use humantime::Duration;
 use hyper::body::HttpBody;
 use hyper::{client::HttpConnector, Body, Client, Uri};
 use quanta::Clock;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -57,18 +60,22 @@ pub struct MurkSession {
     response_fn: (),
 }
 
-async fn run_user(tx: mpsc::UnboundedSender<RequestStats>, opt: Arc<Opt>) {
-    let uri: Uri = opt.endpoint.parse().expect("Invalid URL");
+async fn run_user(
+    tx: mpsc::UnboundedSender<RequestStats>,
+    store: Arc<RequestStore>,
+    opt: Arc<Opt>,
+) {
+    let requests = store.get_requests(store.len());
     let clock = Clock::new();
     let client = Client::new();
     let timeout_dur = *opt.timeout;
     let delay = sleep(*opt.duration);
     tokio::pin!(delay);
-    loop {
+    for req in requests.iter().cycle() {
         let start = clock.now();
         tokio::select! {
             biased;
-            res = timeout(timeout_dur, client.get(uri.clone())) => {
+            res = timeout(timeout_dur, client.request(req.request())) => {
                 match res {
                     Ok(Ok(mut s)) => {
                         let mut bytes_read = 0;
@@ -82,6 +89,7 @@ async fn run_user(tx: mpsc::UnboundedSender<RequestStats>, opt: Arc<Opt>) {
                             request_time,
                             timeout: false,
                             bytes_read: Some(bytes_read),
+                            bytes_written: Some(req.body_len()),
                         });
                     },
                     Ok(Err(e)) => {
@@ -90,6 +98,7 @@ async fn run_user(tx: mpsc::UnboundedSender<RequestStats>, opt: Arc<Opt>) {
                             request_time: None,
                             timeout: false,
                             bytes_read: None,
+                            bytes_written: None,
                         });
                     },
                     Err(e) => {
@@ -98,6 +107,7 @@ async fn run_user(tx: mpsc::UnboundedSender<RequestStats>, opt: Arc<Opt>) {
                             request_time: None,
                             timeout: true,
                             bytes_read: None,
+                            bytes_written: None,
                         });
                     },
                 }
@@ -120,12 +130,46 @@ pub async fn stats_collection(
     summary
 }
 
+fn get_request_store(opt: Arc<Opt>) -> RequestStore {
+    if let Some(conf) = &opt.config {
+        let config = fs::read_to_string(&conf).unwrap();
+        let spec = match serde_yaml::from_str::<Specification>(&config) {
+            Ok(s) => s,
+            Err(e) => match serde_json::from_str::<Specification>(&config) {
+                Ok(s) => s,
+                Err(e2) => {
+                    println!("yaml error: {}", e);
+                    println!("json error: {}", e2);
+                    unreachable!("Neither valid toml or json");
+                }
+            },
+        };
+        RequestStore::create_from_spec(opt.endpoint.clone(), &spec)
+    } else {
+        let req = RequestBuilder::try_from(opt.endpoint.clone()).unwrap();
+        RequestStore {
+            requests: vec![req],
+            weights: vec![1.0],
+        }
+    }
+}
+
 pub async fn run_loadtest(opt: Arc<Opt>) {
     let (tx, rx) = mpsc::unbounded_channel();
     let stats = tokio::task::spawn(stats_collection(rx, opt.clone()));
     let mut jobs = FuturesUnordered::new();
+    let req_opt = opt.clone();
+    let requests = tokio::task::spawn_blocking(move || Arc::new(get_request_store(req_opt)))
+        .await
+        .unwrap();
+
+    println!("Collected {} requests. Running load test", requests.len());
     for _ in 0..opt.connections() {
-        jobs.push(tokio::task::spawn(run_user(tx.clone(), opt.clone())));
+        jobs.push(tokio::task::spawn(run_user(
+            tx.clone(),
+            requests.clone(),
+            opt.clone(),
+        )));
     }
     while let Some(j) = jobs.next().await {
         // Closing down jobs
