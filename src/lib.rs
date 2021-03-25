@@ -1,4 +1,5 @@
 use crate::request::*;
+use crate::scripting::*;
 use crate::spec::*;
 use crate::summary::*;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -15,6 +16,7 @@ use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
 pub mod request;
+pub mod scripting;
 pub mod spec;
 pub mod summary;
 
@@ -39,6 +41,9 @@ pub struct Opt {
     /// Path to a configuration file
     #[structopt(long = "config")]
     config: Option<PathBuf>,
+    /// Points to a script to run. See non-existing documentation for more details.
+    #[structopt(long = "script")]
+    script: Option<PathBuf>,
 }
 
 impl Opt {
@@ -49,15 +54,6 @@ impl Opt {
     pub fn jobs(&self) -> usize {
         self.jobs.unwrap_or_else(num_cpus::get)
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct MurkSession {
-    setup_fn: (),
-    init_fn: (),
-    deay_fn: (),
-    request_fn: (),
-    response_fn: (),
 }
 
 async fn run_user(
@@ -163,6 +159,14 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
         .await
         .unwrap();
 
+    let script_engine = if let Some(script) = opt.script.clone() {
+        Some(tokio::task::spawn_blocking(|| {
+            launch_scripting_engine(script)
+        }))
+    } else {
+        None
+    };
+
     println!("Collected {} requests. Running load test", requests.len());
     for _ in 0..opt.connections() {
         jobs.push(tokio::task::spawn(run_user(
@@ -173,6 +177,12 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
     }
     while let Some(j) = jobs.next().await {
         // Closing down jobs
+    }
+    if let Some(script_hnd) = script_engine {
+        let end = script_hnd.await.unwrap();
+        if let Err(e) = end {
+            println!("There was an error in scripty thingy: {}", e);
+        }
     }
     std::mem::drop(tx);
     let summary = stats.await.unwrap();

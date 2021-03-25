@@ -42,7 +42,18 @@ impl fmt::Display for Summary {
         writeln!(f, "Failed requests: {}", self.failure)?;
         writeln!(f, "Timed out requests: {}", self.timeout)?;
         writeln!(f, "Bytes read: {}", self.bytes_read)?;
-        writeln!(f, "Bytes written: {}", self.bytes_written)
+        writeln!(f, "Bytes written: {}", self.bytes_written)?;
+        writeln!(f, "\nQuantile durations:")?;
+        let quantiles = [0.5, 0.75, 0.9, 0.95, 0.99, 0.999];
+        for quant in &quantiles {
+            writeln!(
+                f,
+                "{}'th percentile: {}",
+                *quant * 100.0,
+                self.histogram.value_at_quantile(*quant)
+            )?;
+        }
+        Ok(())
     }
 }
 
