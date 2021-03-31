@@ -44,11 +44,20 @@ pub struct Opt {
     /// Points to a script to run. See non-existing documentation for more details.
     #[structopt(long = "script")]
     script: Option<PathBuf>,
+    /// Ramp up through sequences of concurrent connections. Will essentially load test at each
+    /// level for the time collecting the results. So equivalent to doing multiple runs with
+    /// different options for `--connections`
+    #[structopt(long = "ramp")]
+    ramp: Option<Vec<usize>>,
 }
 
 impl Opt {
-    pub fn connections(&self) -> usize {
-        self.connections.unwrap_or(500)
+    pub fn connections(&self) -> Vec<usize> {
+        match (&self.connections, &self.ramp) {
+            (Some(c), _) => vec![*c],
+            (_, Some(c)) => c.clone(),
+            _ => vec![500],
+        }
     }
 
     pub fn jobs(&self) -> usize {
@@ -151,40 +160,43 @@ fn get_request_store(opt: Arc<Opt>) -> RequestStore {
 }
 
 pub async fn run_loadtest(opt: Arc<Opt>) {
-    let (tx, rx) = mpsc::unbounded_channel();
-    let stats = tokio::task::spawn(stats_collection(rx, opt.clone()));
-    let mut jobs = FuturesUnordered::new();
     let req_opt = opt.clone();
     let requests = tokio::task::spawn_blocking(move || Arc::new(get_request_store(req_opt)))
         .await
         .unwrap();
-
-    let script_engine = if let Some(script) = opt.script.clone() {
-        Some(tokio::task::spawn_blocking(|| {
-            launch_scripting_engine(script)
-        }))
-    } else {
-        None
-    };
-
     println!("Collected {} requests. Running load test", requests.len());
-    for _ in 0..opt.connections() {
-        jobs.push(tokio::task::spawn(run_user(
-            tx.clone(),
-            requests.clone(),
-            opt.clone(),
-        )));
-    }
-    while let Some(j) = jobs.next().await {
-        // Closing down jobs
-    }
-    if let Some(script_hnd) = script_engine {
-        let end = script_hnd.await.unwrap();
-        if let Err(e) = end {
-            println!("There was an error in scripty thingy: {}", e);
+    for connections in &opt.connections() {
+        println!("Testing for {} concurrent connections", connections);
+        let (tx, rx) = mpsc::unbounded_channel();
+        let stats = tokio::task::spawn(stats_collection(rx, opt.clone()));
+        let mut jobs = FuturesUnordered::new();
+
+        let script_engine = if let Some(script) = opt.script.clone() {
+            Some(tokio::task::spawn_blocking(|| {
+                launch_scripting_engine(script)
+            }))
+        } else {
+            None
+        };
+
+        for _ in 0..*connections {
+            jobs.push(tokio::task::spawn(run_user(
+                tx.clone(),
+                requests.clone(),
+                opt.clone(),
+            )));
         }
+        while let Some(j) = jobs.next().await {
+            // Closing down jobs
+        }
+        if let Some(script_hnd) = script_engine {
+            let end = script_hnd.await.unwrap();
+            if let Err(e) = end {
+                println!("There was an error in scripty thingy: {}", e);
+            }
+        }
+        std::mem::drop(tx);
+        let summary = stats.await.unwrap();
+        println!("Request summary:\n{}", summary);
     }
-    std::mem::drop(tx);
-    let summary = stats.await.unwrap();
-    println!("Request summary:\n{}", summary);
 }

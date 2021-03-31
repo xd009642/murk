@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use std::fs::read_to_string;
 use std::path::Path;
+use tokio::sync::mpsc::Receiver;
 
 /// This needs to be in a spawn_blocking or something cause this gonna block like hellll
 pub fn launch_scripting_engine(script: impl AsRef<Path>) -> PyResult<()> {
