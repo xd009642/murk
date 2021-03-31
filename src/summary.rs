@@ -1,5 +1,6 @@
 use hdrhistogram::Histogram;
 use hyper::StatusCode;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
@@ -19,7 +20,15 @@ pub struct Summary {
     pub timeout: usize,
     pub bytes_read: usize,
     pub bytes_written: usize,
+    pub status_codes: BTreeMap<u16, usize>,
     pub histogram: Histogram<u64>,
+    pub custom_histograms: BTreeMap<String, Histogram<u64>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Update {
+    name: String,
+    value: f64,
 }
 
 impl Summary {
@@ -32,7 +41,14 @@ impl Summary {
             timeout: 0,
             bytes_read: 0,
             bytes_written: 0,
+            custom_histograms: BTreeMap::new(),
+            status_codes: BTreeMap::new(),
         }
+    }
+
+    pub fn register_custom_histogram(&mut self, name: String, min: u64, max: u64, accuracy: u8) {
+        let hist = Histogram::<u64>::new_with_bounds(min, max, accuracy).unwrap();
+        self.custom_histograms.insert(name, hist);
     }
 }
 
@@ -64,7 +80,17 @@ impl std::ops::AddAssign for Summary {
         self.timeout += other.timeout;
         self.bytes_read += other.bytes_read;
         self.bytes_written += other.bytes_written;
-        self.histogram.add(other.histogram);
+        self.histogram.add(other.histogram).unwrap();
+        for (k, v) in self.status_codes.iter_mut() {
+            if let Some(v2) = other.status_codes.get(k) {
+                *v += v2;
+            }
+        }
+        for (k, v) in self.custom_histograms.iter_mut() {
+            if let Some(v2) = other.custom_histograms.get(k) {
+                v.add(v2).unwrap();
+            }
+        }
     }
 }
 
@@ -87,9 +113,19 @@ impl std::ops::AddAssign<RequestStats> for Summary {
 impl std::ops::Add for Summary {
     type Output = Self;
 
-    fn add(self, other: Self) -> Self {
+    fn add(mut self, other: Self) -> Self {
         let mut histogram = self.histogram.clone();
-        histogram.add(other.histogram);
+        histogram.add(other.histogram).unwrap();
+        for (k, v) in self.status_codes.iter_mut() {
+            if let Some(v2) = other.status_codes.get(k) {
+                *v += v2;
+            }
+        }
+        for (k, v) in self.custom_histograms.iter_mut() {
+            if let Some(v2) = other.custom_histograms.get(k) {
+                v.add(v2).unwrap();
+            }
+        }
         Self {
             histogram,
             success: self.success + other.success,
@@ -97,6 +133,8 @@ impl std::ops::Add for Summary {
             timeout: self.timeout + other.timeout,
             bytes_read: self.bytes_read + other.bytes_read,
             bytes_written: self.bytes_written + other.bytes_written,
+            status_codes: self.status_codes,
+            custom_histograms: self.custom_histograms,
         }
     }
 }

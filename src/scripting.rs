@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use std::fs::read_to_string;
 use std::path::Path;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 /// This needs to be in a spawn_blocking or something cause this gonna block like hellll
 pub fn launch_scripting_engine(script: impl AsRef<Path>) -> PyResult<()> {
@@ -15,6 +15,7 @@ pub fn launch_scripting_engine(script: impl AsRef<Path>) -> PyResult<()> {
 
     Python::with_gil(move |py| -> PyResult<()> {
         let module = PyModule::from_code(py, &script_contents, name, "murk_script")?;
+        if let Ok(init_stats) = module.getattr("init_stats") {}
 
         Ok(())
     })
