@@ -25,12 +25,6 @@ pub struct Summary {
     pub custom_histograms: BTreeMap<String, Histogram<u64>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Update {
-    name: String,
-    value: f64,
-}
-
 impl Summary {
     pub fn new(timeout: Duration) -> Self {
         Self {

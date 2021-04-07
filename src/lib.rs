@@ -2,6 +2,7 @@ use crate::request::*;
 use crate::scripting::*;
 use crate::spec::*;
 use crate::summary::*;
+use bytes::{Buf, BytesMut};
 use futures::stream::{FuturesUnordered, StreamExt};
 use humantime::Duration;
 use hyper::body::HttpBody;
@@ -84,8 +85,10 @@ async fn run_user(
                 match res {
                     Ok(Ok(mut s)) => {
                         let mut bytes_read = 0;
+                        let mut buf = BytesMut::new();
                         while let Some(Ok(body)) = s.body_mut().data().await {
                             bytes_read += body.len();
+                            buf.extend_from_slice(body.chunk());
                         }
                         let end = clock.now();
                         let request_time = Some(end.duration_since(start));
@@ -161,6 +164,16 @@ fn get_request_store(opt: Arc<Opt>) -> RequestStore {
 
 pub async fn run_loadtest(opt: Arc<Opt>) {
     let req_opt = opt.clone();
+
+    let script_engine = if let Some(script) = opt.script.clone() {
+        let (resp_tx, resp_rx) = flume::unbounded();
+        let (script_tx, script_rx) = flume::unbounded();
+        Some(tokio::task::spawn_blocking(move || {
+            launch_scripting_engine(script, resp_rx.clone(), script_tx)
+        }))
+    } else {
+        None
+    };
     let requests = tokio::task::spawn_blocking(move || Arc::new(get_request_store(req_opt)))
         .await
         .unwrap();
@@ -170,14 +183,6 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let stats = tokio::task::spawn(stats_collection(rx, opt.clone()));
         let mut jobs = FuturesUnordered::new();
-
-        let script_engine = if let Some(script) = opt.script.clone() {
-            Some(tokio::task::spawn_blocking(|| {
-                launch_scripting_engine(script)
-            }))
-        } else {
-            None
-        };
 
         for _ in 0..*connections {
             jobs.push(tokio::task::spawn(run_user(
@@ -189,14 +194,14 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
         while let Some(j) = jobs.next().await {
             // Closing down jobs
         }
-        if let Some(script_hnd) = script_engine {
-            let end = script_hnd.await.unwrap();
-            if let Err(e) = end {
-                println!("There was an error in scripty thingy: {}", e);
-            }
-        }
         std::mem::drop(tx);
         let summary = stats.await.unwrap();
         println!("Request summary:\n{}", summary);
+    }
+    if let Some(script_hnd) = script_engine {
+        let end = script_hnd.await.unwrap();
+        if let Err(e) = end {
+            println!("There was an error in scripty thingy: {}", e);
+        }
     }
 }
