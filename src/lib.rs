@@ -148,7 +148,7 @@ fn get_request_store(opt: Arc<Opt>) -> RequestStore {
                 Err(e2) => {
                     println!("yaml error: {}", e);
                     println!("json error: {}", e2);
-                    unreachable!("Neither valid toml or json");
+                    panic!("Neither valid toml or json");
                 }
             },
         };
