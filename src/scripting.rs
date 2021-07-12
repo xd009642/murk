@@ -3,6 +3,45 @@ use flume::{Receiver, Sender};
 use pyo3::prelude::*;
 use std::fs::read_to_string;
 use std::path::Path;
+use tokio::task::{spawn_blocking, JoinHandle};
+
+#[derive(Default)]
+pub struct ScriptingContext {
+    response_tx: Option<Sender<RequestStats>>,
+    output_rx: Option<Receiver<ScriptEvents>>,
+    handle: Option<JoinHandle<PyResult<()>>>,
+}
+
+impl ScriptingContext {
+    pub fn load(script: impl AsRef<Path>) -> Self {
+        let (response_tx, response_rx) = flume::unbounded();
+        let (output_tx, output_rx) = flume::unbounded();
+        let script = script.as_ref().to_path_buf();
+        let handle =
+            spawn_blocking(move || launch_scripting_engine(script, response_rx, output_tx));
+        Self {
+            response_tx: Some(response_tx),
+            output_rx: Some(output_rx),
+            handle: Some(handle),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.handle.is_some() && self.response_tx.is_some() && self.output_rx.is_some()
+    }
+
+    pub async fn finish(self) -> PyResult<()> {
+        if let Some(hnd) = self.handle {
+            hnd.await.unwrap()
+        } else {
+            Ok(())
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum ScriptEvents {
@@ -19,7 +58,7 @@ pub enum ScriptEvents {
 }
 
 /// This needs to be in a spawn_blocking or something cause this gonna block like hellll
-pub fn launch_scripting_engine(
+fn launch_scripting_engine(
     script: impl AsRef<Path>,
     responses: Receiver<RequestStats>,
     outputs: Sender<ScriptEvents>,

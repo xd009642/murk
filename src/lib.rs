@@ -166,13 +166,9 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
     let req_opt = opt.clone();
 
     let script_engine = if let Some(script) = opt.script.clone() {
-        let (resp_tx, resp_rx) = flume::unbounded();
-        let (script_tx, script_rx) = flume::unbounded();
-        Some(tokio::task::spawn_blocking(move || {
-            launch_scripting_engine(script, resp_rx.clone(), script_tx)
-        }))
+        ScriptingContext::load(script)
     } else {
-        None
+        ScriptingContext::empty()
     };
     let requests = tokio::task::spawn_blocking(move || Arc::new(get_request_store(req_opt)))
         .await
@@ -198,8 +194,8 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
         let summary = stats.await.unwrap();
         println!("Request summary:\n{}", summary);
     }
-    if let Some(script_hnd) = script_engine {
-        let end = script_hnd.await.unwrap();
+    if script_engine.is_active() {
+        let end = script_engine.finish().await;
         if let Err(e) = end {
             println!("There was an error in scripty thingy: {}", e);
         }
