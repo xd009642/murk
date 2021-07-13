@@ -94,7 +94,7 @@ fn requests_from_operation(
 ) -> (Vec<f64>, Vec<RequestBuilder>) {
     let mut weights = vec![];
     let mut requests = vec![];
-    for (k, v) in &op.request_data {
+    for (_, v) in &op.request_data {
         let mut url = url.clone();
         let mut headers = HeaderMap::new();
         for param in &v.parameters {

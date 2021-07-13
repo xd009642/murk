@@ -11,7 +11,6 @@
 use indexmap::IndexMap;
 use openapiv3::{Parameter, RequestBody};
 use serde::{Deserialize, Serialize};
-use serde_json::value::Value;
 use std::path::PathBuf;
 
 #[doc(hidden)]

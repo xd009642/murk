@@ -6,7 +6,7 @@ use bytes::{Buf, BytesMut};
 use futures::stream::{FuturesUnordered, StreamExt};
 use humantime::Duration;
 use hyper::body::HttpBody;
-use hyper::{client::HttpConnector, Body, Client, Uri};
+use hyper::Client;
 use quanta::Clock;
 use std::fs;
 use std::path::PathBuf;
@@ -66,11 +66,16 @@ impl Opt {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RunError {
+    ChannelClosed,
+}
+
 async fn run_user(
     tx: mpsc::UnboundedSender<RequestStats>,
     store: Arc<RequestStore>,
     opt: Arc<Opt>,
-) {
+) -> Result<(), RunError> {
     let requests = store.get_requests(store.len());
     let clock = Clock::new();
     let client = Client::new();
@@ -98,25 +103,25 @@ async fn run_user(
                             timeout: false,
                             bytes_read: Some(bytes_read),
                             bytes_written: Some(req.body_len()),
-                        });
+                        }).map_err(|_| RunError::ChannelClosed)?;
                     },
-                    Ok(Err(e)) => {
+                    Ok(Err(_)) => {
                         tx.send(RequestStats {
                             status: None,
                             request_time: None,
                             timeout: false,
                             bytes_read: None,
                             bytes_written: None,
-                        });
+                        }).map_err(|_| RunError::ChannelClosed)?;
                     },
-                    Err(e) => {
+                    Err(_) => {
                         tx.send(RequestStats {
                             status: None,
                             request_time: None,
                             timeout: true,
                             bytes_read: None,
                             bytes_written: None,
-                        });
+                        }).map_err(|_| RunError::ChannelClosed)?;
                     },
                 }
             }
@@ -125,6 +130,7 @@ async fn run_user(
             }
         }
     }
+    Ok(())
 }
 
 pub async fn stats_collection(
@@ -189,10 +195,14 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
         }
         while let Some(j) = jobs.next().await {
             // Closing down jobs
+            if j.is_err() {
+                eprintln!("Job failure, channel closed");
+            }
         }
         std::mem::drop(tx);
         let summary = stats.await.unwrap();
         println!("Request summary:\n{}", summary);
+        sleep(StdDuration::from_secs(2)).await;
     }
     if script_engine.is_active() {
         let end = script_engine.finish().await;
