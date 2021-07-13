@@ -13,6 +13,7 @@ pub struct RequestStats {
     pub bytes_written: Option<usize>,
     pub body: Option<Bytes>,
     pub timeout: bool,
+    pub connections: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]

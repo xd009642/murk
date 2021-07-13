@@ -75,6 +75,7 @@ async fn run_user(
     tx: mpsc::UnboundedSender<RequestStats>,
     store: Arc<RequestStore>,
     opt: Arc<Opt>,
+    connections: usize,
 ) -> Result<(), RunError> {
     let requests = store.get_requests(store.len());
     let clock = Clock::new();
@@ -104,6 +105,7 @@ async fn run_user(
                             body: Some(buf.freeze()),
                             bytes_read: Some(bytes_read),
                             bytes_written: Some(req.body_len()),
+                            connections,
                         }).map_err(|_| RunError::ChannelClosed)?;
                     },
                     Ok(Err(_)) => {
@@ -114,6 +116,7 @@ async fn run_user(
                             body: None,
                             bytes_read: None,
                             bytes_written: None,
+                            connections,
                         }).map_err(|_| RunError::ChannelClosed)?;
                     },
                     Err(_) => {
@@ -124,6 +127,7 @@ async fn run_user(
                             body: None,
                             bytes_read: None,
                             bytes_written: None,
+                            connections,
                         }).map_err(|_| RunError::ChannelClosed)?;
                     },
                 }
@@ -202,6 +206,7 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
                 tx.clone(),
                 requests.clone(),
                 opt.clone(),
+                *connections,
             )));
         }
         while let Some(j) = jobs.next().await {

@@ -110,7 +110,7 @@ fn launch_scripting_engine(
                 let body = body_bytes.as_ref().to_object(py);
                 let status = stats.status.unwrap().as_u16().to_object(py);
                 let time = (1000.0 * stats.request_time.unwrap().as_secs_f64()).to_object(py);
-                let args = PyTuple::new(py, &[status, body, time, 1.to_object(py)]);
+                let args = PyTuple::new(py, &[status, body, time, stats.connections.to_object(py)]);
                 if let Err(e) = update.call1(args) {
                     println!("Failed to send request to script");
                 }
