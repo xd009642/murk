@@ -35,11 +35,20 @@ pub struct PathItem {
 pub struct Operation {
     #[serde(default)]
     pub request_data: IndexMap<String, Data>,
+    #[serde(default)]
     pub request_body: RequestBody,
     #[serde(default)]
     pub parameters: Vec<Parameter>,
     #[serde(default = "one")]
     pub weight: usize,
+}
+
+impl Operation {
+    pub fn is_empty(&self) -> bool {
+        self.request_data.is_empty()
+            && self.request_body.content.is_empty()
+            && self.parameters.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -71,6 +80,22 @@ pub enum TestBody {
 mod tests {
     use super::*;
     use serde_yaml::from_str;
+
+    #[test]
+    fn empty_get() {
+        let sample_spec = r#"
+            paths:
+              hello:
+                get:
+                  request_body:
+        "#;
+
+        let spec: Specification = from_str(sample_spec).unwrap();
+        assert!(spec.paths.contains_key("hello"));
+        let item = spec.paths.get("hello").unwrap();
+        assert!(item.post.is_none());
+        assert!(item.get.is_some());
+    }
 
     #[test]
     fn deserialise_specification() {

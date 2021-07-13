@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use hdrhistogram::Histogram;
 use hyper::StatusCode;
 use std::collections::BTreeMap;
@@ -10,6 +11,7 @@ pub struct RequestStats {
     pub status: Option<StatusCode>,
     pub bytes_read: Option<usize>,
     pub bytes_written: Option<usize>,
+    pub body: Option<Bytes>,
     pub timeout: bool,
 }
 
@@ -23,6 +25,15 @@ pub struct Summary {
     pub status_codes: BTreeMap<u16, usize>,
     pub histogram: Histogram<u64>,
     pub custom_histograms: BTreeMap<String, Histogram<u64>>,
+}
+
+impl RequestStats {
+    pub fn is_valid(&self) -> bool {
+        self.request_time.is_some()
+            && self.status.is_some()
+            && self.bytes_read.is_some()
+            && self.bytes_written.is_some()
+    }
 }
 
 impl Summary {

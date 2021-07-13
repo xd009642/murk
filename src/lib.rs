@@ -101,6 +101,7 @@ async fn run_user(
                             status: Some(s.status()),
                             request_time,
                             timeout: false,
+                            body: Some(buf.freeze()),
                             bytes_read: Some(bytes_read),
                             bytes_written: Some(req.body_len()),
                         }).map_err(|_| RunError::ChannelClosed)?;
@@ -110,6 +111,7 @@ async fn run_user(
                             status: None,
                             request_time: None,
                             timeout: false,
+                            body: None,
                             bytes_read: None,
                             bytes_written: None,
                         }).map_err(|_| RunError::ChannelClosed)?;
@@ -119,6 +121,7 @@ async fn run_user(
                             status: None,
                             request_time: None,
                             timeout: true,
+                            body: None,
                             bytes_read: None,
                             bytes_written: None,
                         }).map_err(|_| RunError::ChannelClosed)?;
@@ -135,10 +138,14 @@ async fn run_user(
 
 pub async fn stats_collection(
     mut rx: mpsc::UnboundedReceiver<RequestStats>,
+    script_channel: Option<flume::Sender<RequestStats>>,
     opt: Arc<Opt>,
 ) -> Summary {
     let mut summary = Summary::new(*opt.timeout);
     while let Some(stat) = rx.recv().await {
+        if let Some(script) = script_channel.as_ref() {
+            let _ = script.send_async(stat.clone()).await;
+        }
         summary += stat;
     }
     summary
@@ -183,7 +190,11 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
     for connections in &opt.connections() {
         println!("Testing for {} concurrent connections", connections);
         let (tx, rx) = mpsc::unbounded_channel();
-        let stats = tokio::task::spawn(stats_collection(rx, opt.clone()));
+        let stats = tokio::task::spawn(stats_collection(
+            rx,
+            script_engine.response_sender(),
+            opt.clone(),
+        ));
         let mut jobs = FuturesUnordered::new();
 
         for _ in 0..*connections {
@@ -204,6 +215,7 @@ pub async fn run_loadtest(opt: Arc<Opt>) {
         println!("Request summary:\n{}", summary);
         sleep(StdDuration::from_secs(2)).await;
     }
+
     if script_engine.is_active() {
         let end = script_engine.finish().await;
         if let Err(e) = end {
