@@ -17,7 +17,7 @@ the wait time to actually start sending that request
 that is better than lua with neglible overhead
 * wrk-2 is better for latency measurements apparently so learn from that
 * Worth seeing what jmeter does 
-* Rewrk as a rust load balancer 
+* Rewrk as a rust load tester 
 * Locust I guess, or goose as a rust engine
 
 ## Plan for mun API
